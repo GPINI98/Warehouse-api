@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from app.database import connessione_database
 from app.schemas import ArticoloCreate, MovimentoCreate
+import oracledb
 
 app = FastAPI(
     title="Warehouse API",
@@ -124,14 +125,30 @@ def crea_articolo(articolo:ArticoloCreate):
                 "scorta_minima" : articolo.scorta_minima,
                 }
         
-    except Exception:
-            if connessione:
-                connessione.rollback()
+    except oracledb.DatabaseError as errore:
+        if connessione:
+            connessione.rollback()
 
-    except Exception:
+        codice_errore = errore.args[0].code
+
+        if codice_errore == 1:
+            raise HTTPException(
+                status_code=409,
+                detail="Codice articolo già esistente"
+            )
+
         raise HTTPException(
             status_code=500,
-            detail="Errore durante il recupero degli articoli"
+            detail="Errore durante la creazione dell'articolo"
+        )
+
+    except Exception:
+        if connessione:
+            connessione.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail="Errore durante la creazione dell'articolo"
         )
 
     finally:
@@ -315,7 +332,18 @@ def crea_movimento(movimento: MovimentoCreate):
             }
 
     except HTTPException:
+        if connessione:
+            connessione.rollback()
         raise
+    
+    except oracledb.DatabaseError:
+        if connessione:
+            connessione.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail="Errore del database durante la registrazione del movimento"
+        )
 
     except Exception:
         if connessione:
@@ -329,6 +357,8 @@ def crea_movimento(movimento: MovimentoCreate):
     finally:
         if connessione:
             connessione.close()
+
+        
 
 
 @app.get("/movimenti")
