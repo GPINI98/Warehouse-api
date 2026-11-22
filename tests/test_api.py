@@ -298,3 +298,68 @@ def test_creazione_movimento_errore_database():
 
     connessione_finta.rollback.assert_called_once()
     connessione_finta.commit.assert_not_called()
+
+
+def test_elimina_articolo():
+    connessione_finta = MagicMock()
+    cursore_finto = MagicMock()
+
+    connessione_finta.cursor.return_value.__enter__.return_value = cursore_finto
+    cursore_finto.rowcount = 1
+
+    with patch("app.main.connessione_database", return_value=connessione_finta):
+        risposta = client.delete("/articoli/21")
+
+    assert risposta.status_code == 200
+    assert risposta.json() == {
+        "messaggio": "Articolo eliminato correttamente",
+        "id": 21
+    }
+
+    connessione_finta.commit.assert_called_once()
+    connessione_finta.rollback.assert_not_called()
+
+
+
+def test_elimina_articolo_inesistente():
+    connessione_finta = MagicMock()
+    cursore_finto = MagicMock()
+
+    connessione_finta.cursor.return_value.__enter__.return_value = cursore_finto
+
+    # Simuliamo che nessuna riga sia stata eliminata
+    cursore_finto.rowcount = 0
+
+    with patch("app.main.connessione_database", return_value=connessione_finta):
+        risposta = client.delete("/articoli/999")
+
+    assert risposta.status_code == 404
+    assert risposta.json() == {
+        "detail": "Articolo non trovato"
+    }
+
+    connessione_finta.commit.assert_not_called()
+    connessione_finta.rollback.assert_called_once()
+
+
+def test_elimina_articolo_con_movimenti_collegati():
+    connessione_finta = MagicMock()
+    cursore_finto = MagicMock()
+
+    connessione_finta.cursor.return_value.__enter__.return_value = cursore_finto
+
+    errore_oracle = MagicMock()
+    errore_oracle.code = 2292
+
+    cursore_finto.execute.side_effect = oracledb.DatabaseError(errore_oracle)
+
+    with patch("app.main.connessione_database", return_value=connessione_finta):
+        risposta = client.delete("/articoli/21")
+
+    assert risposta.status_code == 409
+    assert risposta.json() == {
+        "detail": "Impossibile eliminare l'articolo: sono presenti movimenti collegati"
+    }
+
+    connessione_finta.rollback.assert_called_once()
+    connessione_finta.commit.assert_not_called()
