@@ -192,17 +192,36 @@ def modifica_articolo(id_articolo:int, articolo: ArticoloCreate):
                 **articolo.model_dump()
                 }
         
-    except Exception:
+
+    except HTTPException:
+        if connessione:
+            connessione.rollback()
         raise
+
+    except oracledb.DatabaseError as errore:
+        if connessione:
+            connessione.rollback()
+
+        codice_errore = errore.args[0].code
+
+        if codice_errore == 1:
+            raise HTTPException(
+                status_code=409,
+                detail="Codice articolo già esistente"
+            )
+
+        raise HTTPException(
+            status_code=500,
+            detail="Errore durante la modifica dell'articolo"
+        )
 
     except Exception:
         if connessione:
             connessione.rollback()
-            
-    except Exception:
+
         raise HTTPException(
             status_code=500,
-            detail="Errore durante il recupero degli articoli"
+            detail="Errore durante la modifica dell'articolo"
         )
 
     finally:
@@ -211,8 +230,9 @@ def modifica_articolo(id_articolo:int, articolo: ArticoloCreate):
 
 
 
+
 @app.delete("/articoli/{id_articolo}")
-def elimina_articolo(id_articolo:int):
+def elimina_articolo(id_articolo: int):
     connessione = None
 
     try:
@@ -220,33 +240,53 @@ def elimina_articolo(id_articolo:int):
 
         with connessione.cursor() as cursore:
             cursore.execute("""
-                DELETE FROM ARTICOLI 
+                DELETE FROM ARTICOLI
                 WHERE id = :id
-                """, {"id": id_articolo})
-            
+            """, {"id": id_articolo})
+
             if cursore.rowcount == 0:
                 raise HTTPException(
                     status_code=404,
                     detail="Articolo non trovato"
-                )    
+                )
+
             connessione.commit()
 
             return {
-                "messaggio":"Articolo eliminato correttamente",
-                "id": id_articolo,
-                }
-        
-    except Exception:
+                "messaggio": "Articolo eliminato correttamente",
+                "id": id_articolo
+            }
+
+    except HTTPException:
+        if connessione:
+            connessione.rollback()
         raise
+
+    except oracledb.DatabaseError as errore:
+        if connessione:
+            connessione.rollback()
+
+        codice_errore = errore.args[0].code
+
+# record ancora referenziato da un'altra tabella
+        if codice_errore == 2292:
+            raise HTTPException(
+                status_code=409,
+                detail="Impossibile eliminare l'articolo: sono presenti movimenti collegati"
+            )
+
+        raise HTTPException(
+            status_code=500,
+            detail="Errore del database durante l'eliminazione dell'articolo"
+        )
 
     except Exception:
         if connessione:
             connessione.rollback()
-            
-    except Exception:
+
         raise HTTPException(
             status_code=500,
-            detail="Errore durante il recupero degli articoli"
+            detail="Errore durante l'eliminazione dell'articolo"
         )
 
     finally:
