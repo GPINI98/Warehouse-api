@@ -4,3 +4,6 @@ credentials/
 __pycache__/
 .pytest_cache/
 info
+*.py[cod]
+.DS_Store
+.vscode/
