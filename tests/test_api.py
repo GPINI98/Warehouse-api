@@ -170,3 +170,131 @@ def test_creazione_articolo_codice_duplicato():
 
     connessione_finta.rollback.assert_called_once()
     connessione_finta.commit.assert_not_called()
+
+
+
+def test_creazione_movimento_articolo_inesistente():
+    connessione_finta = MagicMock()
+    cursore_finto = MagicMock()
+
+    connessione_finta.cursor.return_value.__enter__.return_value = cursore_finto
+
+    # Simuliamo un articolo che non esiste
+    cursore_finto.fetchone.return_value = None
+
+    dati = {
+        "articolo_id": 999,
+        "tipo": "C",
+        "quantita": 5,
+        "note": "Test articolo inesistente"
+    }
+
+    with patch(
+        "app.main.connessione_database",
+        return_value=connessione_finta
+    ):
+        risposta = client.post("/movimenti", json=dati)
+
+    assert risposta.status_code == 404
+    assert risposta.json() == {"detail": "Articolo non trovato"}
+
+    connessione_finta.commit.assert_not_called()
+
+
+
+def test_creazione_movimento_giacenza_insufficiente():
+    connessione_finta = MagicMock()
+    cursore_finto = MagicMock()
+
+    connessione_finta.cursor.return_value.__enter__.return_value = cursore_finto
+
+    # Prima fetchone: articolo esistente
+    # Seconda fetchone: giacenza attuale pari a 3
+    cursore_finto.fetchone.side_effect = [(21,), (3,)]
+
+    dati = {
+        "articolo_id": 21,
+        "tipo": "S",
+        "quantita": 10,
+        "note": "Test giacenza insufficiente"
+    }
+
+    with patch("app.main.connessione_database", return_value=connessione_finta):
+        risposta = client.post("/movimenti", json=dati)
+
+    assert risposta.status_code == 409
+    assert risposta.json() == {"detail": "Giacenza insufficiente"}
+
+    # Non deve essere registrato alcun movimento
+    assert cursore_finto.execute.call_count == 2
+    connessione_finta.commit.assert_not_called()
+
+
+def test_creazione_movimento():
+    connessione_finta = MagicMock()
+    cursore_finto = MagicMock()
+
+    connessione_finta.cursor.return_value.__enter__.return_value = cursore_finto
+
+    # Articolo esistente e giacenza attuale pari a 3
+    cursore_finto.fetchone.side_effect = [(21,), (3,)]
+
+    # Simuliamo l'ID generato da Oracle
+    cursore_finto.bindvars = {"id": MagicMock()}
+    cursore_finto.bindvars["id"].getvalue.return_value = 100
+
+    dati = {
+        "articolo_id": 21,
+        "tipo": "C",
+        "quantita": 5,
+        "note": "Test carico"
+    }
+
+    with patch("app.main.connessione_database", return_value=connessione_finta):
+        risposta = client.post("/movimenti", json=dati)
+
+    assert risposta.status_code == 201
+    assert risposta.json()["id"] == 100
+    assert risposta.json()["articolo_id"] == 21
+    assert risposta.json()["tipo"] == "C"
+    assert risposta.json()["quantita"] == 5
+
+    # Verifichiamo che il movimento sia stato registrato
+    assert cursore_finto.execute.call_count == 3
+    connessione_finta.commit.assert_called_once()
+    connessione_finta.rollback.assert_not_called()
+
+
+def test_creazione_movimento_errore_database():
+    connessione_finta = MagicMock()
+    cursore_finto = MagicMock()
+
+    connessione_finta.cursor.return_value.__enter__.return_value = cursore_finto
+
+    # Articolo esistente e giacenza pari a 3
+    cursore_finto.fetchone.side_effect = [(21,), (3,)]
+
+    # Simuliamo un errore durante l'INSERT (terza execute)
+    cursore_finto.execute.side_effect = [
+        None,
+        None,
+        Exception("Errore database")
+    ]
+
+    dati = {
+        "articolo_id": 21,
+        "tipo": "C",
+        "quantita": 5,
+        "note": "Test errore database"
+    }
+
+    with patch("app.main.connessione_database", return_value=connessione_finta):
+        risposta = client.post("/movimenti", json=dati)
+
+    assert risposta.status_code == 500
+    assert risposta.json() == {
+        "detail": "Errore durante la registrazione del movimento"
+    }
+
+    connessione_finta.rollback.assert_called_once()
+    connessione_finta.commit.assert_not_called()

@@ -268,6 +268,7 @@ def crea_movimento(movimento: MovimentoCreate):
                 SELECT id
                 FROM ARTICOLI
                 WHERE id = :id
+                FOR UPDATE
             """, {"id": movimento.articolo_id})
 
             if cursore.fetchone() is None:
